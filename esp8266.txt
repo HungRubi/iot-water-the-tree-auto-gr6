@@ -1,0 +1,192 @@
+#include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
+#include <Arduino_JSON.h>
+#include <SoftwareSerial.h>
+#include <ArduinoJson.h>
+#include <WiFiClient.h> 
+#include <ESP8266WebServer.h>
+
+// Định nghĩa các chân kết nối UART trên ESP8266
+const int rxPin = D5;  // RX pin
+const int txPin = D6;  // TX pin
+// Khởi tạo đối tượng SoftwareSerial
+SoftwareSerial espSerial(rxPin, txPin);
+StaticJsonDocument<50> doc;
+StaticJsonDocument<50> gui;
+
+// DHT sensor settings (DHT11).
+
+
+// SSID and Password of your WiFi router.
+const char* ssid = "huyhung";
+const char* password = "19521952";
+
+// Variables for HTTP POST request data.
+String postData = "";  // Variables sent for HTTP POST request data.
+String payload = "";   // Variable for receiving response from HTTP POST.
+int ttled1;
+
+// Subroutine to control LEDs after successfully fetching data from the database.
+void control_LEDs() {
+  Serial.println();
+  Serial.println("---------------control_LEDs()");
+  JSONVar myObject = JSON.parse(payload);
+
+  if (JSON.typeof(myObject) == "undefined") {
+    Serial.println("Parsing input failed!");
+    Serial.println("---------------");
+    return;
+  }
+
+  if (myObject.hasOwnProperty("LED_01")) {
+    Serial.print("myObject[\"LED_01\"] = ");
+    Serial.println(myObject["LED_01"]);
+  }
+
+  if (strcmp(myObject["LED_01"], "ON") == 0) {
+    ttled1=1;
+    gui["led1"] = ttled1;
+    serializeJson(gui, espSerial);
+    espSerial.println();
+  
+    // Chuyển đổi đối tượng JsonDocument thành chuỗi JSON và gửi nó qua cổng nối tiếp thật
+    serializeJson(gui, Serial);
+    Serial.println();
+
+    Serial.println("LED 01 ON");
+  }
+  if (strcmp(myObject["LED_01"], "OFF") == 0) {
+    ttled1=0;
+    gui["led1"] = ttled1;
+    serializeJson(gui, espSerial);
+    espSerial.println();
+  
+    // Chuyển đổi đối tượng JsonDocument thành chuỗi JSON và gửi nó qua cổng nối tiếp thật
+    serializeJson(gui, Serial);
+    Serial.println();
+
+
+    Serial.println("LED 01 OFF");
+  }
+  Serial.println("---------------");
+}
+
+
+void setup() {
+  Serial.begin(115200);
+  espSerial.begin(19200);
+
+
+  WiFi.mode(WIFI_OFF);        //Prevents reconnection issue (taking too long to connect)
+  delay(1000);
+  WiFi.mode(WIFI_STA);        //This line hides the viewing of ESP as wifi hotspot
+  
+  WiFi.begin(ssid, password);     //Connect to your WiFi router
+  Serial.println("");
+
+  Serial.print("Connecting");
+  // Wait for connection
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  //If connection successful show IP address in serial monitor
+  Serial.println("");
+  Serial.print("Connected to ");
+  Serial.println(ssid);
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP()); 
+  Serial.println("-------------");
+
+
+  delay(2000);
+}
+
+void loop() {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    int httpCode;
+    WiFiClient client;
+    // Process to get LEDs data from the database to control LEDs.
+    postData = "id=esp8266_01";
+    payload = "";
+
+
+    Serial.println();
+    Serial.println("---------------getdata.php");
+
+    http.begin( client,"http://ip may tinh cua ban(x.x.x.x)/iot/getdata.php");
+
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+    httpCode = http.POST(postData);
+    payload = http.getString();
+
+    Serial.print("httpCode : ");
+    Serial.println(httpCode);
+    Serial.print("payload  : ");
+    Serial.println(payload);
+
+    http.end();
+    Serial.println("---------------");
+
+    control_LEDs();
+
+    delay(1000);
+
+    //đọc thông tin gửi từ arduino
+  if (espSerial.available()) {
+    // Đọc một dòng từ cổng nối tiếp ảo
+    String line = espSerial.readStringUntil('\n');
+
+    // Chuyển đổi chuỗi JSON thành đối tượng JsonDocument
+    DeserializationError error = deserializeJson(doc, line);
+
+    // Kiểm tra xem có lỗi nào trong quá trình chuyển đổi hay không
+    if (error) {
+      Serial.print("deserializeJson() failed: ");
+      Serial.println(error.c_str());
+      return;
+    }
+    serializeJson(doc, Serial);
+    Serial.println();
+    // Lấy giá trị nhiệt độ và độ ẩm từ đối tượng JsonDocument
+    int doam = doc["doam"];
+    Serial.println(doam);
+    Serial.println("///////////////////////////////");
+    String LED_01_State = "";
+
+    if (ttled1 == 1) LED_01_State = "ON";
+    if (ttled1 == 0) LED_01_State = "OFF";
+    postData = "id=esp8266_01";
+    postData += "&humidity=" + String(doam);
+    postData += "&status_read_sensor_dht11=SUCCESS";
+    postData += "&led_01=" + LED_01_State;
+    payload = "";
+
+  
+    Serial.println();
+    Serial.println("---------------update.php");
+
+    http.begin(  client, "http://ip may tinh cua ban(x.x.x.x)/iot/update.php");
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+    Serial.println(postData);
+    httpCode = http.POST(postData);
+    payload = http.getString();
+    
+    Serial.print("HTTP Code: ");
+    Serial.println(httpCode);
+    Serial.print("HTTP Error: ");
+    Serial.println(http.errorToString(httpCode).c_str());
+
+    Serial.print("payload  : ");
+    Serial.println(payload);
+
+    http.end();
+    Serial.println("---------------");
+  }
+
+    delay(4000);
+  }
+}
